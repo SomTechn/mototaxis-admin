@@ -6,6 +6,7 @@ async function init() {
         await esperarSupabase();
         initMap();
         cargarZonasExistentes();
+        console.log("✅ Admin JS Cargado - Versión RPC");
     } catch (e) {
         alert("Error: " + e.message);
     }
@@ -20,7 +21,6 @@ async function esperarSupabase() {
 }
 
 function initMap() {
-    // Coordenadas Honduras
     map = L.map('mapAdmin').setView([15.50, -88.00], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
@@ -45,22 +45,38 @@ async function guardarZona() {
     const comision = document.getElementById('zoneFee').value;
     const base = document.getElementById('zoneBase').value;
 
-    if (!nombre || !currentLayer) return alert("Faltan datos o dibujo");
+    if (!nombre || !currentLayer) return alert("Faltan datos");
 
-    // 1. Obtener la geometría pura del dibujo
+    // 1. Obtener Geometría
     const geojson = currentLayer.toGeoJSON();
-    const geometry = geojson.geometry; 
+    const geometry = geojson.geometry;
+
+    // 2. TRUCO DE SEGURIDAD: Cerrar el polígono manualmente
+    // PostGIS exige que el primer y último punto sean idénticos
+    const coords = geometry.coordinates[0];
+    const primero = coords[0];
+    const ultimo = coords[coords.length - 1];
+    
+    // Si no son iguales, agregamos el primero al final
+    if (primero[0] !== ultimo[0] || primero[1] !== ultimo[1]) {
+        geometry.coordinates[0].push(primero);
+    }
 
     try {
-        // 2. Enviar a la función SQL 'guardar_zona_final'
-        const { error } = await window.supabaseClient.rpc('guardar_zona_final', {
-            p_nombre: nombre,
-            p_comision: parseFloat(comision),
-            p_base: parseFloat(base),
-            p_geometry: geometry 
+        console.log("Enviando RPC..."); // Debug
+        
+        // 3. USAR RPC (No .insert directo)
+        const { error } = await window.supabaseClient.rpc('crear_zona_rpc', {
+            nombre_zona: nombre,
+            comision: parseFloat(comision),
+            base: parseFloat(base),
+            geometria: geometry
         });
 
-        if (error) throw error;
+        if (error) {
+            console.error("Error SQL:", error);
+            throw error;
+        }
 
         alert("✅ Zona guardada correctamente");
         drawnItems.clearLayers();
@@ -69,13 +85,13 @@ async function guardarZona() {
         cargarZonasExistentes();
 
     } catch (e) {
-        console.error(e);
-        alert("Error: " + e.message);
+        alert("Error: " + e.message + "\n(Mira la consola para más detalles)");
     }
 }
 
 async function cargarZonasExistentes() {
-    const { data, error } = await window.supabaseClient.from('puntos').select('id, nombre, tarifa_base, area').eq('activo', true);
+    // Select simple para ver si guardó
+    const { data, error } = await window.supabaseClient.from('puntos').select('*').eq('activo', true);
     if (error) return;
 
     const lista = document.getElementById('zonesList');
@@ -84,25 +100,23 @@ async function cargarZonasExistentes() {
     data.forEach(zona => {
         lista.innerHTML += `
             <div class="zone-item">
-                <div><strong>${zona.nombre}</strong> (Base: L ${zona.tarifa_base})</div>
+                <strong>${zona.nombre}</strong> (L ${zona.tarifa_base})
                 <button onclick="borrarZona('${zona.id}')" style="color:red;border:none;cursor:pointer">🗑️</button>
             </div>`;
-        
+        // Pintar mapa
         if (zona.area) {
-            L.geoJSON(zona.area, { style: { color: '#2563eb', fillOpacity: 0.1 } }).bindPopup(zona.nombre).addTo(map);
+            L.geoJSON(zona.area).addTo(map);
         }
     });
 }
 
 async function borrarZona(id) {
-    if(confirm("¿Borrar?")) {
-        await window.supabaseClient.from('puntos').delete().eq('id', id);
-        map.eachLayer(l => { if(l instanceof L.Path && l!==drawnItems) map.removeLayer(l); });
-        cargarZonasExistentes();
-    }
+    if(!confirm("¿Borrar?")) return;
+    await window.supabaseClient.from('puntos').delete().eq('id', id);
+    window.location.reload(); 
 }
 
-// Helpers navegación
+// Navegación
 window.showSection = function(id) {
     document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
     document.getElementById('sec-'+id).style.display = 'block';
