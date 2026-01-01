@@ -1,13 +1,12 @@
 let map, drawnItems;
 let currentLayer = null;
 
-
 async function init() {
     try {
         await esperarSupabase();
+        console.log("🚀 CÓDIGO NUEVO CARGADO: Usando RPC"); // BUSCA ESTO EN CONSOLA
         initMap();
         cargarZonasExistentes();
-        console.log("✅ Admin JS Cargado - Versión RPC");
     } catch (e) {
         alert("Error: " + e.message);
     }
@@ -52,21 +51,20 @@ async function guardarZona() {
     const geojson = currentLayer.toGeoJSON();
     const geometry = geojson.geometry;
 
-    // 2. TRUCO DE SEGURIDAD: Cerrar el polígono manualmente
-    // PostGIS exige que el primer y último punto sean idénticos
+    // 2. CORRECCIÓN DE GEOMETRÍA: Cerrar el polígono
     const coords = geometry.coordinates[0];
     const primero = coords[0];
     const ultimo = coords[coords.length - 1];
     
-    // Si no son iguales, agregamos el primero al final
+    // Si el último punto no es igual al primero, lo agregamos
     if (primero[0] !== ultimo[0] || primero[1] !== ultimo[1]) {
         geometry.coordinates[0].push(primero);
     }
 
     try {
-        console.log("Enviando RPC..."); // Debug
+        console.log("Enviando a función RPC...");
         
-        // 3. USAR RPC (No .insert directo)
+        // 3. USAR RPC (ESTO ES LO QUE ESTABA FALLANDO EN TU IMAGEN)
         const { error } = await window.supabaseClient.rpc('crear_zona_rpc', {
             nombre_zona: nombre,
             comision: parseFloat(comision),
@@ -74,10 +72,7 @@ async function guardarZona() {
             geometria: geometry
         });
 
-        if (error) {
-            console.error("Error SQL:", error);
-            throw error;
-        }
+        if (error) throw error;
 
         alert("✅ Zona guardada correctamente");
         drawnItems.clearLayers();
@@ -86,12 +81,13 @@ async function guardarZona() {
         cargarZonasExistentes();
 
     } catch (e) {
-        alert("Error: " + e.message + "\n(Mira la consola para más detalles)");
+        console.error(e);
+        alert("Error: " + e.message + " (Revisa la consola)");
     }
 }
 
 async function cargarZonasExistentes() {
-    // Select simple para ver si guardó
+    // Para listar usamos select normal
     const { data, error } = await window.supabaseClient.from('puntos').select('*').eq('activo', true);
     if (error) return;
 
@@ -101,13 +97,10 @@ async function cargarZonasExistentes() {
     data.forEach(zona => {
         lista.innerHTML += `
             <div class="zone-item">
-                <strong>${zona.nombre}</strong> (L ${zona.tarifa_base})
+                <strong>${zona.nombre}</strong>
                 <button onclick="borrarZona('${zona.id}')" style="color:red;border:none;cursor:pointer">🗑️</button>
             </div>`;
-        // Pintar mapa
-        if (zona.area) {
-            L.geoJSON(zona.area).addTo(map);
-        }
+        if (zona.area) L.geoJSON(zona.area).addTo(map);
     });
 }
 
@@ -117,7 +110,6 @@ async function borrarZona(id) {
     window.location.reload(); 
 }
 
-// Navegación
 window.showSection = function(id) {
     document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
     document.getElementById('sec-'+id).style.display = 'block';
