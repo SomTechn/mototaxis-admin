@@ -1,7 +1,3 @@
-// ==========================================
-// ADMIN PANEL - GESTIÓN DE ZONAS (FINAL FIX)
-// ==========================================
-
 let map, drawnItems;
 let currentLayer = null;
 
@@ -10,9 +6,8 @@ async function init() {
         await esperarSupabase();
         initMap();
         cargarZonasExistentes();
-        console.log("Admin panel listo");
     } catch (e) {
-        alert("Error iniciando: " + e.message);
+        alert("Error: " + e.message);
     }
 }
 
@@ -26,7 +21,7 @@ async function esperarSupabase() {
 
 function initMap() {
     map = L.map('mapAdmin').setView([15.50, -88.00], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
@@ -49,78 +44,62 @@ async function guardarZona() {
     const comision = document.getElementById('zoneFee').value;
     const base = document.getElementById('zoneBase').value;
 
-    if (!nombre || !comision || !base) return alert("Llena todos los campos");
-    if (!currentLayer) return alert("Dibuja la zona primero");
+    if (!nombre || !currentLayer) return alert("Faltan datos o dibujo");
 
-    // --- MAGIA AQUÍ: EXTRAER SOLO COORDENADAS LIMPIAS ---
-    // Leaflet devuelve objetos {lat:..., lng:...}, PostGIS quiere arrays [lng, lat]
-    const latlngs = currentLayer.getLatLngs()[0]; // Obtenemos vértices
-    
-    // Convertir a formato [lng, lat] (Ojo: GeoJSON es Longitud primero)
-    let coordenadas = latlngs.map(p => [p.lng, p.lat]);
-    
-    // CERRAR EL POLÍGONO (El primer punto debe ser igual al último)
-    // Si no lo cerramos nosotros, PostGIS dará error.
-    const primero = coordenadas[0];
-    const ultimo = coordenadas[coordenadas.length - 1];
-    if (primero[0] !== ultimo[0] || primero[1] !== ultimo[1]) {
-        coordenadas.push(primero);
-    }
-
-    console.log("Enviando coordenadas:", JSON.stringify(coordenadas));
+    // 1. OBTENER LA GEOMETRÍA PURA DE LEAFLET
+    // Esto devuelve un objeto: { type: "Polygon", coordinates: [...] }
+    const geojson = currentLayer.toGeoJSON();
+    const geometry = geojson.geometry; 
 
     try {
-        // Llamar a la nueva función simplificada
-        const { error } = await window.supabaseClient.rpc('crear_zona_simple', {
+        // 2. ENVIAR A LA NUEVA FUNCIÓN SQL
+        const { error } = await window.supabaseClient.rpc('guardar_zona_final', {
             p_nombre: nombre,
             p_comision: parseFloat(comision),
             p_base: parseFloat(base),
-            p_coordenadas: coordenadas
+            p_geometry: geometry // Enviamos el objeto directo, NO string
         });
 
         if (error) throw error;
 
         alert("✅ Zona guardada correctamente");
-        
-        // Limpiar
         drawnItems.clearLayers();
         currentLayer = null;
         document.getElementById('zoneName').value = "";
-        
-        // Recargar lista
         cargarZonasExistentes();
 
     } catch (e) {
         console.error(e);
-        alert("Error al guardar: " + e.message + "\n(Revisa consola y SQL)");
+        alert("Error: " + e.message);
     }
 }
 
 async function cargarZonasExistentes() {
-    const { data, error } = await window.supabaseClient.from('puntos').select('id, nombre, comision_valor, tarifa_base, area').eq('activo', true);
-    if (error) return console.error(error);
+    const { data, error } = await window.supabaseClient.from('puntos').select('id, nombre, tarifa_base, area').eq('activo', true);
+    if (error) return;
 
     const lista = document.getElementById('zonesList');
     lista.innerHTML = "";
 
     data.forEach(zona => {
-        const item = document.createElement('div');
-        item.className = 'zone-item';
-        item.innerHTML = `<div><strong>${zona.nombre}</strong><br><small>Base: L ${zona.tarifa_base}</small></div><button onclick="borrarZona('${zona.id}')" style="color:red;border:none;background:none;cursor:pointer">🗑️</button>`;
-        lista.appendChild(item);
-
+        lista.innerHTML += `
+            <div class="zone-item">
+                <div><strong>${zona.nombre}</strong> (Base: L ${zona.tarifa_base})</div>
+                <button onclick="borrarZona('${zona.id}')" style="color:red;border:none;cursor:pointer">🗑️</button>
+            </div>`;
+        
         if (zona.area) {
-            L.geoJSON(zona.area, { style: { color: '#555', weight: 2, fillOpacity: 0.1 } }).bindPopup(zona.nombre).addTo(map);
+            L.geoJSON(zona.area, { style: { color: '#2563eb', fillOpacity: 0.1 } }).bindPopup(zona.nombre).addTo(map);
         }
     });
 }
 
 async function borrarZona(id) {
-    if(!confirm("¿Borrar?")) return;
-    await window.supabaseClient.from('puntos').delete().eq('id', id);
-    // Limpiar mapa visual
-    map.eachLayer((layer) => { if (layer instanceof L.Path && layer !== drawnItems) { map.removeLayer(layer); } });
-    cargarZonasExistentes();
+    if(confirm("¿Borrar?")) {
+        await window.supabaseClient.from('puntos').delete().eq('id', id);
+        map.eachLayer(l => { if(l instanceof L.Path && l!==drawnItems) map.removeLayer(l); });
+        cargarZonasExistentes();
+    }
 }
 
 window.showSection = function(id) {
