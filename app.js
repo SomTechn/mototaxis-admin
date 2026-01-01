@@ -20,6 +20,7 @@ async function esperarSupabase() {
 }
 
 function initMap() {
+    // Coordenadas Honduras
     map = L.map('mapAdmin').setView([15.50, -88.00], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
@@ -46,18 +47,17 @@ async function guardarZona() {
 
     if (!nombre || !currentLayer) return alert("Faltan datos o dibujo");
 
-    // 1. OBTENER LA GEOMETRÍA PURA DE LEAFLET
-    // Esto devuelve un objeto: { type: "Polygon", coordinates: [...] }
+    // 1. Obtener la geometría pura del dibujo
     const geojson = currentLayer.toGeoJSON();
     const geometry = geojson.geometry; 
 
     try {
-        // 2. ENVIAR A LA NUEVA FUNCIÓN SQL
+        // 2. Enviar a la función SQL 'guardar_zona_final'
         const { error } = await window.supabaseClient.rpc('guardar_zona_final', {
             p_nombre: nombre,
             p_comision: parseFloat(comision),
             p_base: parseFloat(base),
-            p_geometry: geometry // Enviamos el objeto directo, NO string
+            p_geometry: geometry 
         });
 
         if (error) throw error;
@@ -102,6 +102,7 @@ async function borrarZona(id) {
     }
 }
 
+// Helpers navegación
 window.showSection = function(id) {
     document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
     document.getElementById('sec-'+id).style.display = 'block';
