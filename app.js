@@ -1,6 +1,7 @@
 let map, drawnItems;
 let currentLayer = null;
 
+
 async function init() {
     try {
         await esperarSupabase();
